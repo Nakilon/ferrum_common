@@ -51,10 +51,17 @@ module FerrumCommon
   Ferrum::Page.include Common
   Ferrum::Frame.include Common
 
-  require "browser_reposition"
-  Ferrum::Browser.include Common, BrowserReposition
-  def self.new **_
-    Ferrum::Browser.new(**_).tap(&:reposition)
+  if "darwin" == Gem::Platform.local.os
+    require "browser_reposition"
+    Ferrum::Browser.include Common, BrowserReposition
+    def self.new **_
+      Ferrum::Browser.new(**_).tap(&:reposition)
+    end
+  else
+    Ferrum::Browser.include Common
+    def self.new **_
+      Ferrum::Browser.new **_
+    end
   end
 
 end
