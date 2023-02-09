@@ -1,6 +1,6 @@
 Gem::Specification.new do |spec|
   spec.name         = "ferrum_common"
-  spec.version      = "0.0.0"
+  spec.version      = "0.1.0"
   spec.summary      = "[WIP] common useful extensions for ferrum or cuprite"
 
   spec.author       = "Victor Maslov aka Nakilon"
@@ -9,7 +9,8 @@ Gem::Specification.new do |spec|
   spec.metadata     = {"source_code_uri" => "https://github.com/nakilon/ferrum_common"}
 
   spec.add_dependency "ferrum"
-  spec.required_ruby_version = ">=2.5"
+  spec.add_dependency "browser_reposition"
+  spec.required_ruby_version = ">=2.5"  # why?
 
   spec.files        = %w{ LICENSE ferrum_common.gemspec lib/ferrum_common.rb }
 end
