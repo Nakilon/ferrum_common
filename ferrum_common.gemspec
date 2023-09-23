@@ -1,6 +1,6 @@
 Gem::Specification.new do |spec|
   spec.name         = "ferrum_common"
-  spec.version      = "0.2.0"
+  spec.version      = "0.3.0"
   spec.summary      = "[WIP] common useful extensions for ferrum or cuprite"
 
   spec.author       = "Victor Maslov aka Nakilon"

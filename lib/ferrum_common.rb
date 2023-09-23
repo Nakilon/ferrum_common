@@ -3,7 +3,7 @@ module FerrumCommon
 
   module Common
 
-    private def mhtml browser, timeout, mtd, msg = nil
+    private def yield_with_timeout browser, timeout, mtd, msg = nil
       Timeout.timeout(timeout){ yield }
     rescue Timeout::Error
       browser.mhtml path: "temp.mhtml"
@@ -14,7 +14,7 @@ module FerrumCommon
     end
 
     def until_true timeout, msg = nil
-      mhtml self, timeout, __method__, msg do
+      yield_with_timeout self, timeout, __method__, msg do
         begin
           yield
         rescue Ferrum::NodeNotFoundError
@@ -25,7 +25,7 @@ module FerrumCommon
 
     def until_one type, selector, timeout
       t = nil
-      mhtml self, timeout, __method__, ->{ "expected exactly one node for #{type} #{selector.inspect}, got #{t ? t.size : "none"}" } do
+      yield_with_timeout self, timeout, __method__, ->{ "expected exactly one node for #{type} #{selector.inspect}, got #{t ? t.size : "none"}" } do
         t = begin
           public_method(type).call selector
         end
@@ -66,11 +66,11 @@ module FerrumCommon
   # https://en.wikipedia.org/wiki/Quoted-printable
   # require "strscan"
   require "nokogiri"  # Oga crashes on vk charset
-  def self.process_mhtml mht
-    scanner = ::StringScanner.new mht
-    fail scanner.peek(100).inspect unless scanner.scan(/\AFrom: <Saved by Blink>\r
+  def self.process_mhtml
+    scanner = ::StringScanner.new(mht = ARGF.read)
+    fail scanner.peek(400).inspect unless scanner.scan(/\AFrom: <Saved by Blink>\r
 Snapshot-Content-Location: \S+\r
-Subject:(?: \S+\r\n)+Date: [A-Z][a-z][a-z], \d\d? [A-Z][a-z][a-z] 20\d\d \d\d:\d\d:\d\d -0000\r
+Subject:(?: \S.*\r\n)+Date: [A-Z][a-z][a-z], \d\d? [A-Z][a-z][a-z] 20\d\d \d\d:\d\d:\d\d -0000\r
 MIME-Version: 1\.0\r
 Content-Type: multipart\/related;\r
 \ttype="text\/html";\r
@@ -88,19 +88,19 @@ Content-Location: chrome-error:\/\/chromewebdata\/\r\n\r\n/,
            /\A\r\nContent-Type: text\/html\r
 Content-ID: <frame-[A-Z0-9]{32}@mhtml\.blink>\r
 Content-Transfer-Encoding: quoted-printable\r\n\r\n/
-        puts "trash #{$'.size}"
+        STDERR.puts "trash #{$'.size}"
         reps.push [prev-delimeter.size-2, scanner.pos-delimeter.size-4, "", ""]
       when /\A\r\nContent-Type: text\/html\r
 Content-ID: <frame-[A-Z0-9]{32}@mhtml\.blink>\r
 Content-Transfer-Encoding: quoted-printable\r
 Content-Location: \S+\r\n\r\n/
-        puts "html #{$'.size}"
+        STDERR.puts "html #{$'.size}"
         header = $&
         t = $'.gsub(/=([0-9A-F][0-9A-F])/){ fail $1 unless "3D" == $1 || "20" == $1 || "0A" == $1 unless "80" <= $1; $1.hex.chr }.gsub("=\r\n", "")
-        puts "unpacked #{t.size}"
+        STDERR.puts "unpacked #{t.size}"
         html = ::Nokogiri::HTML t#.force_encoding "utf-8"
 
-        puts ".to_s.size #{html.to_s.size}"
+        STDERR.puts ".to_s.size #{html.to_s.size}"
 
         html.xpath("//*[not(*)]").group_by(&:name).
           map{ |_, g| [_, g.map(&:to_s).map(&:size).reduce(:+)] }.
@@ -108,46 +108,48 @@ Content-Location: \S+\r\n\r\n/
 
         if block_given?
           yield html
-          puts "yielded"
-          puts "yield #{html.to_s.size}"
+          STDERR.puts "yielded"
+          STDERR.puts "yield #{html.to_s.size}"
         end
 
         reps.push [prev, scanner.pos-delimeter.size-4, header, html.to_s, true, :html]
       when /\A\r\nContent-Type: text\/css\r
 Content-Transfer-Encoding: quoted-printable\r
 Content-Location: \S+\r\n\r\n/
-        puts "css > #{$'.size}"
+        STDERR.puts "css > #{$'.size}"
         header = $&
         css = $'.gsub(/=([0-9A-F][0-9A-F])/){ fail $1 unless "3D" == $1 || "20" == $1 || "0A" == $1 unless "80" <= $1; $1.hex.chr }.gsub("=\r\n", "")
         css.gsub!(/[\r\n]+/, "\n")
 
-        puts "css < #{css.size}"
+        STDERR.puts "css < #{css.size}"
         reps.push [prev, scanner.pos-delimeter.size-4, header, css, true, :css]
 
       when /\A\r\nContent-Type: image\/(webp|png|gif|jpeg)\r
 Content-Transfer-Encoding: base64\r
 Content-Location: \S+\r\n\r\n/
-        puts "#{$1} #{$'.size}"
+        STDERR.puts "#{$1} #{$'.size}"
       when /\A\r\nContent-Type: image\/svg\+xml\r
 Content-Transfer-Encoding: quoted-printable\r
 Content-Location: \S+\r\n\r\n/
-        puts "svg #{$'.size}"
+        STDERR.puts "svg #{$'.size}"
       else
-        puts doc[0..300]
+        STDERR.puts doc[0..300]
         fail
       end
       fail unless scanner.charpos == prev = scanner.pos
     end
 
-    p is = reps.map.with_index{ |(_, _, _, _, _, type), i| i if :html == type }.compact
-    p cs = reps.map.with_index{ |(_, _, _, _, _, type), i| i if :css == type }.compact
+    is = reps.map.with_index{ |(_, _, _, _, _, type), i| i if :html == type }.compact
+    STDERR.puts is.inspect
+    cs = reps.map.with_index{ |(_, _, _, _, _, type), i| i if :css == type }.compact
+    STDERR.puts cs.inspect
     cs.each_cons(2){ |i,j| fail unless i+1==j }
     fail unless is == [cs[0]-1]
     File.write "temp.htm", reps[is[0]][3]
     puts "css > #{File.size "temp.css"}"
     File.open("temp.css", "w"){ |f| cs.each{ |i| f.puts reps[i][3] } }
     system "uncss temp.htm -s temp.css -o out.css"
-    puts "css < #{File.size "out.css"}"
+    STDERR.puts "css < #{File.size "out.css"}"
     reps[cs[0]][1] = reps[cs[-1]][1]
     reps[cs[0]+1..cs[-1]] = []
     reps[cs[0]][3] = File.read "out.css"
@@ -158,11 +160,11 @@ Content-Location: \S+\r\n\r\n/
           b.gsub(/[\x80-\xFF]/n){ |_| "=%02X" % _.ord }.
           gsub(/.{73}[^=][^=](?=.)/, "\\0=\r\n") :
         header + str.gsub("\n", "\r\n")
-      p [str.size, "to - from = #{to - from}"]
+      STDERR.puts [str.size, "to - from = #{to - from}"].inspect
       mht[from...to] = str
     end
-    p ::File.write "temp.mht", mht
-    puts "OK"
+    puts mht
+    STDERR.puts "OK"
   end
 
 end
