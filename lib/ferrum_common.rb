@@ -23,6 +23,16 @@ module FerrumCommon
       end
     end
 
+    def find_any type, selector, timeout
+      Timeout.timeout timeout do
+        t = public_method(type).call selector
+        return t unless t.empty?
+        sleep timeout * 0.1
+        redo
+      end
+    rescue Timeout::Error
+    end
+
     def until_one type, selector, timeout, node = nil
       t = nil
       yield_with_timeout self, timeout, __method__, ->{ "expected exactly one node for #{type} #{selector.inspect}, got #{t ? t.size : "none"}" } do
