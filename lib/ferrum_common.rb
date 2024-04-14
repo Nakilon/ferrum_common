@@ -19,15 +19,15 @@ module FerrumCommon
           yield
         rescue Ferrum::NodeNotFoundError
           redo
-        end or (sleep timeout*0.1; redo)
+        end or (sleep timeout * 0.1; redo)
       end
     end
 
-    def until_one type, selector, timeout
+    def until_one type, selector, timeout, node = nil
       t = nil
       yield_with_timeout self, timeout, __method__, ->{ "expected exactly one node for #{type} #{selector.inspect}, got #{t ? t.size : "none"}" } do
         t = begin
-          public_method(type).call selector
+          public_method(type).call selector, within: node
         end
         unless 1 == t.size
           sleep timeout * 0.1
@@ -38,7 +38,7 @@ module FerrumCommon
     end
 
     def abort msg_or_cause
-      # puts (msg_or_cause.respond_to?(:backtrace) ? msg_or_cause : Thread.current).backtrace
+      puts msg_or_cause
       puts (msg_or_cause.respond_to?(:full_message) ? msg_or_cause.full_message : Thread.current.backtrace)
       mhtml path: "temp.mhtml"
       STDERR.puts "dumped to ./temp.mhtml"
@@ -104,7 +104,7 @@ Content-Location: \S+\r\n\r\n/
 
         html.xpath("//*[not(*)]").group_by(&:name).
           map{ |_, g| [_, g.map(&:to_s).map(&:size).reduce(:+)] }.
-          sort_by(&:last).reverse.take(5).each &method(:p)
+          sort_by(&:last).reverse.take(5).each{ |_| STDERR.puts _.inspect }
 
         if block_given?
           yield html
@@ -126,12 +126,21 @@ Content-Location: \S+\r\n\r\n/
 
       when /\A\r\nContent-Type: image\/(webp|png|gif|jpeg)\r
 Content-Transfer-Encoding: base64\r
-Content-Location: \S+\r\n\r\n/
+Content-Location: https:\S+\r\n\r\n/
         STDERR.puts "#{$1} #{$'.size}"
+      when /\A\r\nContent-Type: binary\/octet-stream\r
+Content-Transfer-Encoding: base64\r
+Content-Location: https:\/\/\S+\r\n\r\n/
+        STDERR.puts "binary #{$'.size}"
       when /\A\r\nContent-Type: image\/svg\+xml\r
 Content-Transfer-Encoding: quoted-printable\r
-Content-Location: \S+\r\n\r\n/
+Content-Location: https:\S+\r\n\r\n/
         STDERR.puts "svg #{$'.size}"
+      when /\A\r\nContent-Type: image\/gif\r
+Content-ID: <frame-[0-9A-F]{32}@mhtml\.blink>\r
+Content-Transfer-Encoding: base64\r
+Content-Location: https:\S+\r\n\r\n/
+        STDERR.puts "gif #{$'.size}"
       else
         STDERR.puts doc[0..300]
         fail
@@ -146,7 +155,7 @@ Content-Location: \S+\r\n\r\n/
     cs.each_cons(2){ |i,j| fail unless i+1==j }
     fail unless is == [cs[0]-1]
     File.write "temp.htm", reps[is[0]][3]
-    puts "css > #{File.size "temp.css"}"
+    STDERR.puts "css > #{File.size "temp.css"}"
     File.open("temp.css", "w"){ |f| cs.each{ |i| f.puts reps[i][3] } }
     system "uncss temp.htm -s temp.css -o out.css"
     STDERR.puts "css < #{File.size "out.css"}"
