@@ -4,13 +4,18 @@ module FerrumCommon
   module Common
 
     private def yield_with_timeout browser, timeout, mtd, msg = nil
-      Timeout.timeout(timeout){ yield }
-    rescue Timeout::Error
+      ::Timeout.timeout(timeout){ yield }
+    rescue ::Timeout::Error
+      begin
       browser.mhtml path: "temp.mhtml"
-      STDERR.puts "dumped to ./temp.mhtml"
+      rescue ::Ferrum::BrowserError
+        sleep 1
+        browser.mhtml path: "temp.mhtml"
+      end
+      ::STDERR.puts "dumped to ./temp.mhtml"
       $!.backtrace.reject!{ |_| _[/\/gems\/concurrent-ruby-/] }
       $!.backtrace.reject!{ |_| _[/\/gems\/ferrum-/] }
-      raise Timeout::Error, "#{$!.to_s} after #{timeout} sec in #{mtd}#{" (#{msg.respond_to?(:call) ? msg.call : msg})" if msg}"
+      raise ::Timeout::Error, "#{$!.to_s} after #{timeout} sec in #{mtd}#{" (#{msg.respond_to?(:call) ? msg.call : msg})" if msg}"
     end
 
     def until_true timeout, msg = nil
