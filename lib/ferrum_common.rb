@@ -38,18 +38,22 @@ module FerrumCommon
     rescue Timeout::Error
     end
 
-    def until_one type, selector, timeout, node = nil
+    def until_n type, selector, timeout, n, node = nil
       t = nil
-      yield_with_timeout self, timeout, __method__, ->{ "expected exactly one node for #{type} #{selector.inspect}, got #{t ? t.size : "none"}" } do
+      yield_with_timeout self, timeout, __method__, ->{ "expected exactly #{n} nodes for #{type} #{selector.inspect}, got #{t ? t.size : "none"}" } do
         t = begin
           public_method(type).call selector, within: node
         end
-        unless 1 == t.size
+        unless n == t.size
           sleep timeout * 0.1
           redo
         end
       end
-      t.first
+      t
+    end
+
+    def until_one type, selector, timeout, node = nil
+      until_n(type, selector, timeout, 1, node).first
     end
 
     def abort msg_or_cause
