@@ -89,7 +89,7 @@ module FerrumCommon
     scanner = ::StringScanner.new(mht = ARGF.read)
     fail scanner.peek(400).inspect unless scanner.scan(/\AFrom: <Saved by Blink>\r
 Snapshot-Content-Location: \S+\r
-Subject:(?: \S.*\r\n)+Date: [A-Z][a-z][a-z], \d\d? [A-Z][a-z][a-z] 20\d\d \d\d:\d\d:\d\d -0000\r
+Subject:(?: \S.*\r\n)+Date: [A-Z][a-z][a-z], \d\d? [A-Z][a-z][a-z] 20\d\d \d\d:\d\d:\d\d [-+]0\d00\r
 MIME-Version: 1\.0\r
 Content-Type: multipart\/related;\r
 \ttype="text\/html";\r
@@ -115,7 +115,7 @@ Content-Transfer-Encoding: quoted-printable\r
 Content-Location: \S+\r\n\r\n/
         STDERR.puts "html #{$'.size}"
         header = $&
-        t = $'.gsub(/=([0-9A-F][0-9A-F])/){ fail $1 unless "3D" == $1 || "20" == $1 || "0A" == $1 unless "80" <= $1; $1.hex.chr }.gsub("=\r\n", "")
+        t = $'.gsub(/=([0-9A-F][0-9A-F])/){ fail $1 unless "3D" == $1 || "20" == $1 || "0A" == $1 || "09" == $1 unless "80" <= $1; $1.hex.chr }.gsub("=\r\n", "")
         STDERR.puts "unpacked #{t.size}"
         html = ::Nokogiri::HTML t#.force_encoding "utf-8"
 
@@ -145,7 +145,7 @@ Content-Location: \S+\r\n\r\n/
 
       when /\A\r\nContent-Type: image\/(webp|png|gif|jpeg)\r
 Content-Transfer-Encoding: base64\r
-Content-Location: https:\S+\r\n\r\n/
+Content-Location: https?:\S+\r\n\r\n/
         STDERR.puts "#{$1} #{$'.size}"
       when /\A\r\nContent-Type: binary\/octet-stream\r
 Content-Transfer-Encoding: base64\r
@@ -153,12 +153,12 @@ Content-Location: https:\/\/\S+\r\n\r\n/
         STDERR.puts "binary #{$'.size}"
       when /\A\r\nContent-Type: image\/svg\+xml\r
 Content-Transfer-Encoding: quoted-printable\r
-Content-Location: https:\S+\r\n\r\n/
+Content-Location: https?:\S+\r\n\r\n/
         STDERR.puts "svg #{$'.size}"
       when /\A\r\nContent-Type: image\/gif\r
 Content-ID: <frame-[0-9A-F]{32}@mhtml\.blink>\r
 Content-Transfer-Encoding: base64\r
-Content-Location: https:\S+\r\n\r\n/
+Content-Location: https?:\S+\r\n\r\n/
         STDERR.puts "gif #{$'.size}"
       else
         STDERR.puts doc[0..300]
@@ -174,8 +174,8 @@ Content-Location: https:\S+\r\n\r\n/
     cs.each_cons(2){ |i,j| fail unless i+1==j }
     fail unless is == [cs[0]-1]
     File.write "temp.htm", reps[is[0]][3]
-    STDERR.puts "css > #{File.size "temp.css"}"
     File.open("temp.css", "w"){ |f| cs.each{ |i| f.puts reps[i][3] } }
+    STDERR.puts "css > #{File.size "temp.css"}"
     system "uncss temp.htm -s temp.css -o out.css"
     STDERR.puts "css < #{File.size "out.css"}"
     reps[cs[0]][1] = reps[cs[-1]][1]
