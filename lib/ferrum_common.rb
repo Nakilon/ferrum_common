@@ -1,4 +1,19 @@
 require "ferrum"
+::Ferrum::Node.module_eval do
+  def rect
+    ::Struct.new(:x, :y, :width, :height).new(*::JSON.load(page.evaluate(<<~HEREDOC, self)))
+      ( function(node) {
+        var x = scrollX, y = scrollY;
+        var rect = JSON.parse(JSON.stringify(node.getBoundingClientRect()));
+        rect.top += scrollY;
+        rect.left += scrollX;
+        var t = JSON.stringify( [rect.left, rect.top, rect.width, rect.height, ] );
+        return t;
+      } )(arguments[0])
+    HEREDOC
+  end
+end
+
 module FerrumCommon
 
   module Common
@@ -68,22 +83,94 @@ module FerrumCommon
   Ferrum::Page.include Common
   Ferrum::Frame.include Common
 
-  if "darwin" == Gem::Platform.local.os
-    require "browser_reposition"
-    Ferrum::Browser.include Common, BrowserReposition
-    def self.new **_
-      Ferrum::Browser.new(**_).tap(&:reposition)
+  module CoreGraphics
+    require "ffi"
+    extend ::FFI::Library
+    ffi_lib "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
+    attach_function :CGGetActiveDisplayList, [:uint32, :pointer, :pointer], :uint32
+    class CGRect < ::FFI::Struct
+      layout :x, :double,
+             :y, :double,
+             :width, :double,
+             :height, :double
     end
-  else
-    Ferrum::Browser.include Common
-    def self.new **_
-      Ferrum::Browser.new **_
+    attach_function :CGDisplayBounds, [:uint32], CGRect.by_value
+  end if "Darwin" == ::Etc.uname[:sysname]
+  def self.browser_reposition ferrum_browser, mtd, dx = 0, dy = 0
+    case ::Etc.uname[:sysname]
+    when "Darwin"
+      count_ptr = ::FFI::MemoryPointer.new :uint32
+      CoreGraphics.CGGetActiveDisplayList 0, nil, count_ptr
+      display_ids = ::FFI::MemoryPointer.new :uint32, count_ptr.read_uint32
+      CoreGraphics.CGGetActiveDisplayList count_ptr.read_uint32, display_ids, nil
+      displays = display_ids.read_array_of_uint32(count_ptr.read_uint32).map do |display_id|
+        CoreGraphics.CGDisplayBounds display_id
+      end
+      best = displays.map{ |_| _[:x] }.method(mtd).call
+      display = displays.find{ |_| best == _[:x] }
+      ferrum_browser.position = {left: display[:x] + dx, top: display[:y] + dy}
+    else
+      "#{::Etc.uname[:sysname].inspect} isn't supported yet"
+    end
+  end
+
+  def self.parse_mhtml mhtml_string
+    scanner = ::StringScanner.new mhtml_string
+    fail scanner.peek(400).inspect unless scanner.scan(/\AFrom: <Saved by Blink>\r
+Snapshot-Content-Location: \S+\r
+Subject:(?: \S.*\r\n)+Date: [A-Z][a-z][a-z], \d\d? [A-Z][a-z][a-z] 20\d\d \d\d:\d\d:\d\d [-+]0\d00\r
+MIME-Version: 1\.0\r
+Content-Type: multipart\/related;\r
+\ttype="text\/html";\r
+\tboundary="(----MultipartBoundary--[a-zA-Z0-9]{42}----)"\r\n\r\n\r\n--\1/)
+    delimeter = scanner[1]
+    fail unless scanner.charpos == prev = scanner.pos
+    while s = scanner.search_full(::Regexp.new(delimeter), true, true)
+      case doc = s[0...-delimeter.size-4]
+      when /\A\r\nContent-Type: text\/html\r
+Content-ID: <frame-[A-Z0-9]{32}@mhtml\.blink>\r
+Content-Transfer-Encoding: quoted-printable\r
+Content-Location: chrome-error:\/\/chromewebdata\/\r\n\r\n/,
+           /\A\r\nContent-Type: text\/html\r
+Content-ID: <frame-[A-Z0-9]{32}@mhtml\.blink>\r
+Content-Transfer-Encoding: quoted-printable\r\n\r\n/
+        # trash
+      when /\A\r\nContent-Type: text\/html\r
+Content-ID: <frame-[A-Z0-9]{32}@mhtml\.blink>\r
+Content-Transfer-Encoding: quoted-printable\r
+Content-Location: \S+\r\n\r\n/
+        # html
+      when /\A\r\nContent-Type: text\/css\r
+Content-Transfer-Encoding: quoted-printable\r
+Content-Location: \S+\r\n\r\n/
+        # css
+      when /\A\r\nContent-Type: image\/(webp|png|gif|jpeg)\r
+Content-Transfer-Encoding: base64\r
+Content-Location: (https?:\S+)\r\n\r\n(([+\/0-9A-Za-z=]{,76}\r\n)+)\z/
+        yield $1, $2, $3
+      when /\A\r\nContent-Type: binary\/octet-stream\r
+Content-Transfer-Encoding: base64\r
+Content-Location: https:\/\/\S+\r\n\r\n/
+        # binary
+      when /\A\r\nContent-Type: image\/svg\+xml\r
+Content-Transfer-Encoding: quoted-printable\r
+Content-Location: https?:\S+\r\n\r\n/
+        # svg
+      when /\A\r\nContent-Type: image\/gif\r
+Content-ID: <frame-[0-9A-F]{32}@mhtml\.blink>\r
+Content-Transfer-Encoding: base64\r
+Content-Location: https?:\S+\r\n\r\n/
+        # gif
+      else
+        STDERR.puts s[0..300]
+        fail
+      end
+      fail unless scanner.charpos == prev = scanner.pos
     end
   end
 
   # https://datatracker.ietf.org/doc/html/rfc2557
   # https://en.wikipedia.org/wiki/Quoted-printable
-  # require "strscan"
   require "nokogiri"  # Oga crashes on vk charset
   def self.process_mhtml
     scanner = ::StringScanner.new(mht = ARGF.read)
